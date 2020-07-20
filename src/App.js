@@ -1,5 +1,4 @@
 import React, { Component } from "react";
-import Papa from "papaparse";
 import ComboBox from "./components/comboBox";
 import ChipArray from "./components/chipArray";
 import { MyResponsiveLine } from "./components/myResponsiveLine";
@@ -11,6 +10,8 @@ import Typography from "@material-ui/core/Typography";
 import Divider from "@material-ui/core/Divider";
 import Slider from "@material-ui/core/Slider";
 import Paper from "@material-ui/core/Paper";
+
+import DataUtilityClass from "./DataUtilityClass";
 import {
   lineChartDescription,
   scatterPlotDescription,
@@ -21,9 +22,14 @@ import {
   CSV_SCATTERPLOT_POPULATION,
   CSV_SCATTERPLOT_GPD,
 } from "./constants";
+
 import "./App.css";
 
 const colorGenerator = require("color-generator");
+
+// Utility class contains business logic for downloading .csv data, parsing and
+// getting it into the format required by nivo
+const dataUtilityClass = new DataUtilityClass();
 
 class App extends Component {
   state = {
@@ -50,8 +56,8 @@ class App extends Component {
       CSV_SCATTERPLOT_GPD,
     ].map((e) => SERVER_ENDPOINT + e);
 
-    // Fetch data
-    this.fetchDataAndParseCSV(sources)
+    dataUtilityClass
+      .fetchDataAndParseCSV(sources)
       .then((result) => {
         // console.log(result);
 
@@ -62,9 +68,11 @@ class App extends Component {
         const dataScatterPlotGDP = result[3].data;
 
         // Convert objects to required format for charts
-        const dataLineChart = this.prepareDataForLineChart(childMortality);
+        const dataLineChart = dataUtilityClass.prepareDataForLineChart(
+          childMortality
+        );
 
-        const dataScatterPlot = this.prepareDataForScatterPlot(
+        const dataScatterPlot = dataUtilityClass.prepareDataForScatterPlot(
           dataScatterPlotPopulation,
           dataScatterPlotGDP
         );
@@ -98,159 +106,41 @@ class App extends Component {
       });
   }
 
-  fetchDataAndParseCSV = async (sources) => {
-    let promiseChain = [];
-
-    for (let source of sources) {
-      const promise = new Promise((resolve, reject) => {
-        Papa.parse(source, {
-          download: true,
-          header: true,
-          dynamicTyping: true,
-          complete: (results) => {
-            // console.log(`results for ${source}`, results);
-            resolve({ source, data: results.data });
-          },
-          error: (error) => {
-            console.error("Error loading csv", error.message);
-            reject(error.message);
-          },
-        });
-      });
-      promiseChain.push(promise);
-    }
-
-    return Promise.all(promiseChain);
-  };
-
-  prepareDataForScatterPlot = (population, gdp) => {
-    let result = []; // [ { year: [year], data: { id: country, data: [{ x: valueOfYear, y: valueofYear2 }] }, etc. ]
-    let yearStart = 1950;
-    let yearEnd = 2017;
-    let year = yearStart;
-
-    while (year <= yearEnd) {
-      for (let populationEntry of population) {
-        const country = populationEntry.country;
-        const valueOfYear = populationEntry[year] / 1000000; // get population in million
-        const gdpObj = gdp.filter((e) => e.country === country)[0];
-
-        // Check if country is in other dataset
-        if (!gdpObj) continue;
-
-        const valueofYear2 = gdpObj[year];
-
-        if (!valueOfYear || !valueofYear2) continue;
-
-        const newPoint = {
-          year: year,
-          data: { id: country, data: [{ x: valueOfYear, y: valueofYear2 }] },
-        };
-
-        result.push(newPoint);
-      }
-      year++;
-    }
-
-    return result;
-  };
-
-  prepareDataForLineChart = (results) => {
-    let data = [];
-    for (let result of results) {
-      const entries = Object.entries(result);
-
-      let newPoint = {
-        id: "",
-        data: [], // {x: 2, y: 2}
-      };
-
-      // Last entry in object is always id
-      const [key, id] = entries.pop();
-      newPoint.id = id;
-
-      // Rest of object is years in ascending order
-      for (let entry of entries) {
-        let [year, value] = entry;
-        if (Number.isNaN(Number(year)))
-          console.error("Problem parsing CSV: NaN");
-
-        // if (!value) value = 0; // null unproblematic for nivo
-        newPoint.data.push({ x: Number(year), y: value });
-      }
-      data.push(newPoint);
-    }
-
-    return data;
-  };
-
   addCountry = (country) => {
-    if (
-      this.state.countryAndColor.filter(
-        (element) => element.country === country
-      ).length
-    )
+    if (this.state.countryAndColor.filter((e) => e.country === country).length)
       return;
+
+    const newPoint1 = dataUtilityClass.getDataPointLineChart(
+      this.state.dataLineChart,
+      country
+    );
+    const newPoint2 = dataUtilityClass.getDataPointParallelChart(
+      this.state.dataParallelChart,
+      country
+    );
 
     this.setState({
       countryAndColor: [
         ...this.state.countryAndColor,
         { country, color: colorGenerator().hexString() },
       ],
-    });
-    this.addDataPointLineChart(country);
-    this.addDataPointParallelChart(country);
-  };
-
-  // id equals country
-  addDataPointParallelChart = (id) => {
-    const result = this.state.dataParallelChart.filter(
-      (e) => e.country === id
-    )[0];
-
-    const country = result.country;
-
-    // Filter out country field
-    let newPoint = {};
-    for (let key of Object.keys(result)) {
-      if (key === "country") continue;
-
-      newPoint = { ...newPoint, [key]: result[key] };
-    }
-
-    this.setState({
-      showDataParallelChart: [
-        ...this.state.showDataParallelChart,
-        { id: country, data: newPoint },
-      ],
+      showDataLineChart: [...this.state.showDataLineChart, newPoint1],
+      showDataParallelChart: [...this.state.showDataParallelChart, newPoint2],
     });
   };
 
-  // id equals country
-  addDataPointLineChart = (id) => {
-    const newPoint = this.state.dataLineChart.filter(
-      (element) => element.id === id
+  removeDataPoint = (country) => {
+    const showDataLineChart = dataUtilityClass.removeDataPointLineChart(
+      this.state.showDataLineChart,
+      country
     );
-    if (newPoint.length < 1) return;
-
-    this.setState({
-      showDataLineChart: [...this.state.showDataLineChart, newPoint[0]],
-    });
-  };
-
-  // id equals country
-  removeDataPoint = (id) => {
-    const showDataLineChart = this.state.showDataLineChart.filter(
-      (element) => element.id !== id
-    );
-    if (showDataLineChart.length < 1) return;
-
-    const showDataParallelChart = this.state.showDataParallelChart.filter(
-      (element) => element.id !== id
+    const showDataParallelChart = dataUtilityClass.removeDataPointParallelChart(
+      this.state.showDataParallelChart,
+      country
     );
 
     const countryAndColor = this.state.countryAndColor.filter(
-      (element) => element.country !== id
+      (element) => element.country !== country
     );
 
     this.setState({
@@ -267,26 +157,6 @@ class App extends Component {
       showDataParallelChart: this.state.showDataParallelChart.slice(0, 1),
       countryAndColor: this.state.countryAndColor.slice(0, 1),
     });
-  };
-
-  // Removes missing data (null) to get optimal scaling for line chart
-  resizeData = (data) => {
-    let shortest = 10000;
-
-    for (let element of data) {
-      let index = 0;
-
-      for (let entry of element.data) {
-        if (entry.y) {
-          if (index < shortest) shortest = index;
-          break;
-        }
-
-        index++;
-      }
-    }
-
-    return shortest;
   };
 
   onComboBoxChange = ({ event, value, reason }) => {
@@ -333,7 +203,7 @@ class App extends Component {
         <LineChart
           countryAndColor={this.state.countryAndColor}
           lineChartDescription={lineChartDescription}
-          resizeData={this.resizeData}
+          resizeData={dataUtilityClass.resizeData}
           showDataLineChart={this.state.showDataLineChart}
         />
 
