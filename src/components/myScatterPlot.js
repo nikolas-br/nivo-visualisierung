@@ -14,7 +14,8 @@ export const MyResponsiveScatterPlot = ({ data, scale }) => (
     xFormat={function (e) {
       return e + " million people\n";
     }}
-    yScale={{ type: "linear", min: 0, max: 100000 * scale }}
+    // yScale={{ type: "linear", min: 0, max: 100000 * scale }}
+    yScale={{ type: "log", min: 500, max: 100000 * scale, base: 2 }}
     yFormat={function (e) {
       return e + " $GDP/capita";
     }}
